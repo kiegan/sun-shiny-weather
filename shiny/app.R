@@ -2,10 +2,14 @@ library(shiny)
 require(tidyverse)
 require(dplyr)
 library(plotly)
+library(rvest)
 
-#load("~/Desktop/IowaState/Semester4/Stat585X/Project/sun-shiny-weather/data/temps.Rda")
+data(temps)
 ##### I'm not sure why this did this... it is in the data folder so we should just be able to look at it
 # Define UI for application that draws a histogram
+temps <- temps %>% na.omit()
+
+
 shinyApp(
   ui = navbarPage(
     "NYT Weather Chart: \n Major Midwestern Cities",
@@ -13,19 +17,23 @@ shinyApp(
              inputPanel(selectInput("citySelect", label = "City:",
                                     choices = unique(temps$city), selected = "Des Moines, IA"),
                         sliderInput("yearSlider", label = "Year:",
-                                    min = 1945, max = 2016, step = 1, sep = "",value = 2015),
+                                    min = 1950, max = 2016, step = 1, sep = "",value = 2015),
                         
                         checkboxGroupInput("checkLayer", label = ("Data Layers:"), 
                                            choices = list("Record Values" = 1, 
                                                           "Historical Averages" = 2, 
-                                                          "Daily for Current Year" = 3))),
+                                                          "Daily for Chosen Year" = 3), selected = c(1,2,3)),
+                        checkboxInput("currentTemp", label = "Add Current Temperature",
+                                           value = FALSE),
+                        submitButton("Update View", icon("refresh"))),
              plotOutput('tempsplot')#,
              #verbatimTextOutput('selected')
              ),
     
     tabPanel("Spaghetti Plot",
              inputPanel(selectInput("citySelectSpag", label = "City:",
-                                    choices = unique(temps$city), selected = "Des Moines, IA")),
+                                    choices = unique(temps$city), selected = "Des Moines, IA"),
+                        submitButton("Update View", icon("refresh"))),
              plotOutput('spagplot'))
     ),
   
@@ -100,7 +108,7 @@ shinyApp(
                                         fill = "#BCACAC", alpha = 0.8)
       
       text_layer_average <-  annotate("text",
-                                      label = "Normal range", 
+                                      label = "Range of Historical Averages", 
                                       x =  lubridate::ymd("2016-07-19"), 
                                       y = 0, 
                                       hjust = "right", 
@@ -227,6 +235,39 @@ shinyApp(
       else{
         display_plot <- base
       }
+      
+      
+      
+      ### add in if statement to scrape current temperature
+      if(length(input$checkLayer) > 0 & input$currentTemp == TRUE){
+        state <- gsub(".*\ ", "", input$citySelect)  ## getting state from the first entry in temps$city
+        city <- gsub(",.*", "", input$citySelect)  ## getting city from the first entry in temps$city
+        city <- gsub("\\.", "", city)  ## getting rid of "." if it exists in a city i.e. St. Louis
+        city <- gsub(" ", "_", city)  ## replacing a space with "_" i.e. St_Louis
+        
+        url <- paste0("https://www.wunderground.com/US/", state, "/", city, ".html")
+        html <- read_html(url)
+        
+        cur_temp <- html %>% html_nodes("#curTemp .wx-value") %>% html_text() %>% parse_number()
+        cur_date <- lubridate::ymd(paste0("2016", "-", lubridate::month(lubridate::today()), "-", lubridate::day(lubridate::today())))
+        
+        cur_point_layer <- geom_point(aes(x = cur_date, y = cur_temp), color = "black")
+        
+        cur_point_legend <-  annotate("text",
+                                      label = paste0("Current Temperature in ", input$citySelect), 
+                                      x =  cur_date, 
+                                      y = 110, 
+                                      hjust = "left", 
+                                      size = 3)
+        cur_point_legend_line <- geom_segment(aes(x = cur_date,
+                                                 xend = cur_date,
+                                                 y = 110,
+                                                 yend = cur_temp + 2),
+                                              size = 0.05, arrow = arrow(length = unit(0.3,"cm")))
+        display_plot <- display_plot + cur_point_layer + cur_point_legend + cur_point_legend_line
+      }
+      
+      
       return(display_plot)
     })
     
@@ -246,7 +287,7 @@ shinyApp(
                               mean_max_min == "Mean Temperature") %>% 
         mutate(date_2016 = lubridate::ymd(paste("2016", month, day, sep = "-")))
       
-      base_spag <- temps_spag %>% filter(year < 2016) %>%
+      base_spag <- temps_spag %>% filter(year < 2016 & year > 1950) %>%
         ggplot(aes(x = date_2016, y = value, group = year)) + 
         geom_line(colour = "grey") + 
         theme_classic() +
@@ -262,7 +303,7 @@ shinyApp(
         xlab("") +
         ylab("")
       
-      layer_2016 <- geom_line(data = temps_spag[temps_spag$year == 2016,], aes(x = date_2016, y = value), colour = "maroon")
+      layer_2016 <- geom_line(data = temps_spag[temps_spag$year == 2016,], aes(x = date_2016, y = value), colour = "steelblue")
    
       layer_2017 <- geom_line(data = temps_spag[temps_spag$year == 2017,], aes(x = date_2016, y = value), colour = "steelblue", lwd = 1.5)
       
@@ -276,7 +317,7 @@ shinyApp(
                                          xmax =  lubridate::ymd("2016-07-27"), 
                                          ymin = -9, 
                                          ymax = -8.5), 
-                                     fill = "maroon")
+                                     fill = "steelblue")
       
       legend_layer_blue <- geom_rect(aes(xmin = lubridate::ymd("2016-07-13"), 
                                          xmax =  lubridate::ymd("2016-07-27"), 
